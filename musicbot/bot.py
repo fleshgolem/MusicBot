@@ -77,7 +77,7 @@ class MusicBot(discord.Client):
         self.permissions = Permissions(perms_file, grant_all=[self.config.owner_id])
 
         self.blacklist = set(load_file(self.config.blacklist_file))
-        self.autoplaylist = Autoplaylist(self.config.auto_playlist_file)
+        self.autoplaylist = Autoplaylist(self.config.auto_playlist_file, auto_manage=self.config.auto_playlist_automanage)
         self.downloader = downloader.Downloader(download_folder='audio_cache')
 
         self.exit_signal = None
@@ -1004,6 +1004,7 @@ class MusicBot(discord.Client):
 
             try:
                 entry, position = await player.playlist.add_entry(song_url, channel=channel, author=author)
+                self.autoplaylist.play_song(song_url)
 
             except exceptions.WrongEntryTypeError as e:
                 if e.use_url == song_url:
@@ -1401,7 +1402,6 @@ class MusicBot(discord.Client):
 
         if player.is_stopped:
             raise exceptions.CommandError("Can't skip! The player is not playing!", expire_in=20)
-
         if not player.current_entry:
             if player.playlist.peek():
                 if player.playlist.peek()._is_downloading:
@@ -1420,8 +1420,8 @@ class MusicBot(discord.Client):
         if author.id == self.config.owner_id \
                 or permissions.instaskip \
                 or author == player.current_entry.meta.get('author', None):
-
             player.skip()  # check autopause stuff here
+            self.autoplaylist.skip_song(player.current_entry.url)
             await self._manual_delete_check(message)
             return
 
@@ -1437,7 +1437,10 @@ class MusicBot(discord.Client):
                               sane_round_int(num_voice * self.config.skip_ratio_required)) - num_skips
 
         if skips_remaining <= 0:
+            self.autoplaylist.skip_song()
             player.skip()  # check autopause stuff here
+            self.autoplaylist.skip_song(player.current_entry.url)
+
             return Response(
                 'your skip for **{}** was acknowledged.'
                 '\nThe vote to skip has been passed.{}'.format(
