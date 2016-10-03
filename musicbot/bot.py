@@ -27,6 +27,7 @@ from musicbot.player import MusicPlayer
 from musicbot.config import Config, ConfigDefaults
 from musicbot.permissions import Permissions, PermissionsDefaults
 from musicbot.utils import load_file, write_file, sane_round_int
+from .autoplaylist import Autoplaylist
 
 from . import exceptions
 from . import downloader
@@ -76,14 +77,14 @@ class MusicBot(discord.Client):
         self.permissions = Permissions(perms_file, grant_all=[self.config.owner_id])
 
         self.blacklist = set(load_file(self.config.blacklist_file))
-        self.autoplaylist = load_file(self.config.auto_playlist_file)
+        self.autoplaylist = Autoplaylist(self.config.auto_playlist_file)
         self.downloader = downloader.Downloader(download_folder='audio_cache')
 
         self.exit_signal = None
         self.init_ok = False
         self.cached_client_id = None
 
-        if not self.autoplaylist:
+        if not self.autoplaylist.has_songs:
             print("Warning: Autoplaylist is empty, disabling.")
             self.config.auto_playlist = False
 
@@ -416,13 +417,12 @@ class MusicBot(discord.Client):
     async def on_player_finished_playing(self, player, **_):
         if not player.playlist.entries and not player.current_entry and self.config.auto_playlist:
             while self.autoplaylist:
-                song_url = choice(self.autoplaylist)
+                song_url = self.autoplaylist.get_song()
                 info = await self.downloader.safe_extract_info(player.playlist.loop, song_url, download=False, process=False)
 
                 if not info:
-                    self.autoplaylist.remove(song_url)
+                    self.autoplaylist.remove(song_url, force_save=True)
                     self.safe_print("[Info] Removing unplayable song from autoplaylist: %s" % song_url)
-                    write_file(self.config.auto_playlist_file, self.autoplaylist)
                     continue
 
                 if info.get('entries', None):  # or .get('_type', '') == 'playlist'
@@ -438,7 +438,7 @@ class MusicBot(discord.Client):
 
                 break
 
-            if not self.autoplaylist:
+            if not self.autoplaylist.has_songs:
                 print("[Warning] No playable songs in the autoplaylist, disabling.")
                 self.config.auto_playlist = False
 
